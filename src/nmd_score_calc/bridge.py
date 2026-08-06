@@ -6,8 +6,7 @@ from typing import Any
 from py_mini_racer import MiniRacer
 
 
-_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
-_BUNDLE_PATH = _PACKAGE_ROOT / "src" / "nmd_score_calc" / "bundle.js"
+_BUNDLE_PATH = Path(__file__).resolve().parent / "bundle.js"
 _BACKEND_ROOT = os.environ.get("NMD_BPM_BACKEND_ROOT")
 
 
