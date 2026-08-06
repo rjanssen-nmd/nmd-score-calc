@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nmd-score-calc"
+version = "0.1.0"
+description = "Python bridge for the shared NMD BPM frontend calculator logic"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Ronald Janssen"},
+]
+dependencies = [
+    "py_mini_racer>=0.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nmd_score_calc*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
