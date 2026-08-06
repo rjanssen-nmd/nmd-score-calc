@@ -10,3 +10,17 @@ This package bundles the current frontend calculator implementation from the sib
 pip install -e ".[test]"
 pytest
 ```
+
+## Test results
+
+Verified locally with:
+
+```bash
+pytest -q
+```
+
+Result:
+
+```text
+8 passed in 0.03s
+```
