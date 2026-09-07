@@ -1,9 +1,21 @@
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Any
 
-from py_mini_racer import MiniRacer
+with warnings.catch_warnings():
+    # py_mini_racer defines a ctypes.Structure (`ArrayBufferByte`) that sets
+    # `_pack_` without `_layout_`. Python 3.14 emits a DeprecationWarning for
+    # that at import time. The layout it falls back to is the one it wants and
+    # the module is third-party, so scope-silence just this import rather than
+    # leaking the warning into every consumer's test output.
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Due to 'pack', the 'ArrayBufferByte' Structure",
+        category=DeprecationWarning,
+    )
+    from py_mini_racer import MiniRacer
 
 
 _BUNDLE_PATH = Path(__file__).resolve().parent / "bundle.js"

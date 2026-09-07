@@ -1,4 +1,8 @@
 import math
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +12,25 @@ from nmd_score_calc.bridge import (
     calculate_mpg,
     reconcile_scaling,
 )
+
+
+def test_import_does_not_leak_py_mini_racer_deprecation_warning():
+    # py_mini_racer's `ArrayBufferByte` ctypes.Structure triggers a
+    # DeprecationWarning on Python 3.14.7+ (ctypes `_pack_` without `_layout_`).
+    # bridge.py scope-silences it; this guards that suppression. Runs in a
+    # subprocess so py_mini_racer is imported fresh with DeprecationWarnings
+    # promoted to errors. On Pythons that don't emit the warning it just passes.
+    repo_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-W", "error::DeprecationWarning", "-c", "import nmd_score_calc.bridge"],
+        cwd=repo_root,
+        env={**os.environ, "PYTHONPATH": str(repo_root / "src")},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "ArrayBufferByte" not in result.stderr
 
 
 def test_build_mpg_kern_matches_upstream_behavior():
