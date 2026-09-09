@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nmd-score-calc"
-version = "0.1.2"
+version = "0.2.0"
 description = "Python bridge for the shared NMD BPM frontend calculator logic"
 readme = "README.md"
 requires-python = ">=3.10"

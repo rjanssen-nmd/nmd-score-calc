@@ -40,8 +40,20 @@ def test_wheel_install_imports_bundle(tmp_path):
         text=True,
     )
 
+    # Resolve the packaged bundle without importing nmd_score_calc.bridge:
+    # that module imports py_mini_racer, a runtime dependency the --no-deps
+    # install above deliberately omits. This test only asserts that bundle.js
+    # ships as package data inside the wheel and is resolvable post-install.
     result = subprocess.run(
-        [str(python_exe), "-c", "import nmd_score_calc; print(nmd_score_calc.bridge._BUNDLE_PATH)"],
+        [
+            str(python_exe),
+            "-c",
+            "import importlib.util, pathlib; "
+            "spec = importlib.util.find_spec('nmd_score_calc'); "
+            "path = pathlib.Path(spec.origin).parent / 'bundle.js'; "
+            "print(path); "
+            "assert path.is_file(), path",
+        ],
         cwd=repo_root,
         check=True,
         capture_output=True,

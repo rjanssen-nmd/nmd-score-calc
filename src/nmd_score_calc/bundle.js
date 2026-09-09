@@ -1,3 +1,4 @@
+// Bundled from nmd_bpm_backend commit fab28c7c73ee3e89da1344350e07c6b47b86805f
 var NmdScoreCalc = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -20,10 +21,16 @@ var NmdScoreCalc = (() => {
   // scripts/entry.mjs
   var entry_exports = {};
   __export(entry_exports, {
-    STAGES: () => STAGES,
+    STAGES: () => STAGES2,
+    applyWeights: () => applyWeights,
     buildMPGKern: () => buildMPGKern,
+    buildMPGRTKern: () => buildMPGRTKern,
+    buildMPOKern: () => buildMPOKern,
+    buildScaledProductMatrix: () => buildScaledProductMatrix,
     calcScaleFactor: () => calcScaleFactor,
     calculateMPG: () => calculateMPG,
+    computeReplacementFactors: () => computeReplacementFactors,
+    getWeights: () => getWeights,
     reconcileScaling: () => reconcileScaling
   });
 
@@ -61,9 +68,156 @@ var NmdScoreCalc = (() => {
     }
     return result;
   }
+  function matSum(matrix) {
+    return matrix.reduce(
+      (total, row) => total + row.reduce(
+        (r, v) => r + v,
+        0
+      ),
+      0
+    );
+  }
+
+  // ../nmd_bpm_backend/html/js/calculation/kernels.js
+  function buildMPGKern(f_i, f_r, onv_herg, STAGES3) {
+    const Ncol = STAGES3.length;
+    let OHf = 1;
+    if (onv_herg === "Ja") {
+      OHf = 0.2;
+    }
+    const MPG_diag = new Array(Ncol).fill(1);
+    STAGES3.forEach((mod, i) => {
+      if (mod.startsWith("A1") || mod.startsWith("C3") || mod.startsWith("C4") || mod.startsWith("D")) {
+        MPG_diag[i] = OHf;
+      }
+    });
+    STAGES3.forEach((mod, i) => {
+      if (mod.startsWith("B")) {
+        MPG_diag[i] = f_i;
+      }
+    });
+    const b5Col = STAGES3.indexOf("B5");
+    MPG_diag[b5Col] = 0;
+    const MPG_kern = Array.from(
+      { length: Ncol },
+      (_, row) => Array.from(
+        { length: Ncol },
+        (_2, col) => row === col ? MPG_diag[row] : 0
+      )
+    );
+    const b4Col = STAGES3.indexOf("B4");
+    if (b4Col !== -1) {
+      STAGES3.forEach((mod, row) => {
+        if (mod.startsWith("A") || mod.startsWith("B") || mod.startsWith("C")) {
+          MPG_kern[row][b4Col] += f_r;
+        }
+      });
+    }
+    if (b4Col !== -1 & b5Col !== -1) {
+      MPG_kern[b5Col][b4Col] = 0;
+    }
+    return MPG_kern;
+  }
+  function buildMPOKern(f_i, f_r, onv_herg, type, route, STAGES3) {
+    const Ncol = STAGES3.length;
+    let OHf = 1;
+    if (onv_herg === "Ja") {
+      OHf = 0.2;
+    }
+    const MPO_kern = Array.from(
+      { length: Ncol },
+      () => new Array(Ncol).fill(0)
+    );
+    const idx = (mod) => STAGES3.indexOf(mod);
+    if (route === "Forfaitair" && type === "Toevoegen") {
+      ["A1-3", "A4", "A5", "C1", "C2", "C3", "C4"].forEach((mod) => {
+        const i = idx(mod);
+        if (i === -1) return;
+        const withOHf = mod === "A1-3" || mod === "C3" || mod === "C4";
+        MPO_kern[i][i] = withOHf ? OHf : 1;
+      });
+      ["B1", "B2", "B3", "B4"].forEach((mod) => {
+        const i = idx(mod);
+        if (i !== -1) {
+          MPO_kern[i][i] = f_i;
+        }
+      });
+      const dCol = idx("D");
+      if (dCol !== -1) {
+        MPO_kern[dCol][dCol] = OHf + f_r;
+      }
+      const b4Col = idx("B4");
+      if (b4Col !== -1) {
+        STAGES3.forEach((mod, row) => {
+          if (mod.startsWith("A") || mod.startsWith("B") || mod.startsWith("C")) {
+            MPO_kern[row][b4Col] += f_r;
+          }
+        });
+        const b5Col = idx("B5");
+        if (b5Col !== -1) {
+          MPO_kern[b5Col][b4Col] = 0;
+        }
+      }
+    } else if (route === "Forfaitair" && type === "Verwijderen") {
+      const a5Col = idx("A5");
+      if (a5Col !== -1) {
+        MPO_kern[idx("C1")][a5Col] = 1;
+        MPO_kern[idx("C2")][a5Col] = 1;
+        MPO_kern[idx("C3")][a5Col] = OHf;
+        MPO_kern[idx("C4")][a5Col] = OHf;
+      }
+      const dCol = idx("D");
+      if (dCol !== -1) {
+        MPO_kern[dCol][dCol] = OHf;
+      }
+    } else if (route === "Specifiek" && type === "Toevoegen") {
+      const b2Col = idx("B2");
+      if (b2Col !== -1) {
+        MPO_kern[idx("A1-3")][b2Col] = OHf;
+        MPO_kern[idx("A4")][b2Col] = 1;
+        MPO_kern[idx("A5")][b2Col] = 1;
+      }
+      const b1Col = idx("B1");
+      if (b1Col !== -1) {
+        MPO_kern[idx("B1")][b1Col] = 1;
+      }
+    } else if (route === "Specifiek" && type === "Verwijderen") {
+      const b2Col = idx("B2");
+      if (b2Col !== -1) {
+        MPO_kern[idx("C1")][b2Col] = 1;
+        MPO_kern[idx("C2")][b2Col] = 1;
+        MPO_kern[idx("C3")][b2Col] = OHf;
+        MPO_kern[idx("C4")][b2Col] = OHf;
+      }
+      const dCol = idx("D");
+      if (dCol !== -1) {
+        MPO_kern[dCol][dCol] = OHf;
+      }
+    }
+    return MPO_kern;
+  }
+  function buildMPGRTKern(f_i, f_r, onv_herg, type, STAGES3) {
+  }
+
+  // ../nmd_bpm_backend/html/js/calculation/stages.js
+  var STAGES = [
+    "A1-3",
+    "A4",
+    "A5",
+    "B1",
+    "B2",
+    "B3",
+    "B4",
+    "B5",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "D"
+  ];
 
   // ../nmd_bpm_backend/html/js/calculation/scaling.js
-  var STAGES = [
+  var STAGES2 = [
     "A1-3",
     "A4",
     "A5",
@@ -174,63 +328,26 @@ var NmdScoreCalc = (() => {
     return f;
   }
 
-  // ../nmd_bpm_backend/html/js/calculation/kernels.js
-  function buildMPGKern(f_i, f_r, onv_herg, STAGES3) {
-    const Ncol = STAGES3.length;
-    let OHf = 1;
-    if (onv_herg === "Ja") {
-      OHf = 0.2;
+  // ../nmd_bpm_backend/html/js/utils/ids.js
+  function generateUuid() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
     }
-    const MPG_diag = new Array(Ncol).fill(1);
-    STAGES3.forEach((mod, i) => {
-      if (mod.startsWith("A1") || mod.startsWith("C3") || mod.startsWith("C4") || mod.startsWith("D")) {
-        MPG_diag[i] = OHf;
-      }
-    });
-    STAGES3.forEach((mod, i) => {
-      if (mod.startsWith("B")) {
-        MPG_diag[i] = f_i;
-      }
-    });
-    const b5Col = STAGES3.indexOf("B5");
-    MPG_diag[b5Col] = 0;
-    const MPG_kern = Array.from(
-      { length: Ncol },
-      (_, row) => Array.from(
-        { length: Ncol },
-        (_2, col) => row === col ? MPG_diag[row] : 0
-      )
-    );
-    const b4Col = STAGES3.indexOf("B4");
-    if (b4Col !== -1) {
-      STAGES3.forEach((mod, row) => {
-        if (mod.startsWith("A") || mod.startsWith("B") || mod.startsWith("C")) {
-          MPG_kern[row][b4Col] += f_r;
-        }
-      });
-    }
-    if (b4Col !== -1 & b5Col !== -1) {
-      MPG_kern[b5Col][b4Col] = 0;
-    }
-    return MPG_kern;
+    const bytes = typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function" ? crypto.getRandomValues(new Uint8Array(16)) : Uint8Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+    bytes[6] = bytes[6] & 15 | 64;
+    bytes[8] = bytes[8] & 63 | 128;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20, 32)
+    ].join("-");
   }
-
-  // ../nmd_bpm_backend/html/js/calculation/stages.js
-  var STAGES2 = [
-    "A1-3",
-    "A4",
-    "A5",
-    "B1",
-    "B2",
-    "B3",
-    "B4",
-    "B5",
-    "C1",
-    "C2",
-    "C3",
-    "C4",
-    "D"
-  ];
+  function uid() {
+    return generateUuid();
+  }
 
   // ../nmd_bpm_backend/html/js/calculation/traceLogger.js
   var traceEntries = [];
@@ -250,7 +367,7 @@ var NmdScoreCalc = (() => {
     product = null
   }) {
     traceEntries.push({
-      id: crypto.randomUUID(),
+      id: uid(),
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       phase,
       title,
@@ -305,6 +422,128 @@ var NmdScoreCalc = (() => {
     });
   }
 
+  // ../nmd_bpm_backend/html/js/calculation/productContribution.js
+  function getWeights(strategy, indicators) {
+    const indicatorMap = {};
+    indicators.forEach(
+      (indicator) => {
+        indicatorMap[indicator.id] = indicator.title;
+      }
+    );
+    return (strategy.impact_indicators || []).sort(
+      (a, b) => a.ordering - b.ordering
+    ).map((weight) => ({
+      id: weight.impact_indicator,
+      title: indicatorMap[weight.impact_indicator] || weight.impact_indicator,
+      weight: Number(weight.weight)
+    }));
+  }
+  function applyWeights(matrix, weights) {
+    return matrix.map(
+      (row, index) => row.map(
+        (value) => value * weights[index].weight
+      )
+    );
+  }
+  function computeReplacementFactors({
+    declaration,
+    levensduur
+  }) {
+    const declaredLifespan = Number(
+      declaration.construction_product?.lifespan
+    ) || levensduur;
+    const lifespan = declaredLifespan === 999 ? levensduur : declaredLifespan;
+    const f_i = Math.min(
+      1,
+      levensduur / lifespan
+    );
+    const f_r = Math.max(
+      0,
+      levensduur / lifespan - 1
+    );
+    return {
+      f_i,
+      f_r,
+      lifespan
+    };
+  }
+  function buildScaledProductMatrix({
+    product,
+    declaration,
+    assessmentStrategy,
+    registration,
+    impactCount,
+    STAGES: STAGES3
+  }) {
+    const productMatrix = zeros(
+      impactCount,
+      STAGES3.length
+    );
+    const profiles = declaration.environmental_profiles || [];
+    let matchedProfile = false;
+    for (const profile of profiles) {
+      const factor = calcScaleFactor(
+        profile,
+        product.schaling || []
+      );
+      const data = profile.environmental_data?.find(
+        (ed) => ed.assessment_strategy === assessmentStrategy?.id
+      );
+      if (!data || !data.scores) {
+        const warning = `Geen scores gevonden voor strategie ${assessmentStrategy?.title || assessmentStrategy?.id} bij profiel "${profile.title || profile.id}" van ${product.nmd_id}`;
+        addWarning(
+          warning
+        );
+        continue;
+      }
+      matchedProfile = true;
+      for (let i = 0; i < impactCount; i++) {
+        for (let j = 0; j < STAGES3.length; j++) {
+          productMatrix[i][j] += factor * (data.scores[i]?.[j] || 0);
+        }
+      }
+    }
+    const warnings = [];
+    if (!matchedProfile) {
+      const unresolvedWarning = `Verklaring van ${product.nmd_id} ("${declaration.construction_product?.title || "onbekend product"}") is onopgelost: geen profiel met scores voor strategie ${assessmentStrategy?.title || assessmentStrategy?.id} gevonden`;
+      addWarning(
+        unresolvedWarning
+      );
+      warnings.push(
+        unresolvedWarning
+      );
+    }
+    if (!registration) {
+      const registrationMissingWarning = `Geen registratiegegevens voor ${product.nmd_id} \u2014 categorie-3 opslag kan niet worden toegepast`;
+      addWarning(
+        registrationMissingWarning
+      );
+      warnings.push(
+        registrationMissingWarning
+      );
+    }
+    const aantal = Number(product.aantal) || 0;
+    const categoryFactor = registration?.category === "category-3" ? 1.3 : 1;
+    const dIndex = STAGES3.indexOf("D");
+    const scaled = productMatrix.map(
+      (row) => row.map(
+        (value, colIndex) => {
+          const withAantal = value * aantal;
+          if (colIndex === dIndex && withAantal <= 0) {
+            return withAantal;
+          }
+          return withAantal * categoryFactor;
+        }
+      )
+    );
+    return {
+      scaled,
+      matchedProfile,
+      warnings,
+      aantal
+    };
+  }
+
   // ../nmd_bpm_backend/html/js/producten/scalingProfiles.js
   function getScaleableProfiles(declaration) {
     const profiles = declaration?.environmental_profiles || [];
@@ -322,7 +561,7 @@ var NmdScoreCalc = (() => {
       (inspectedValue, index) => suppliedDimensies[index] ?? inspectedValue
     );
     return {
-      id: crypto.randomUUID(),
+      id: uid(),
       profiel: profile.title,
       dimensies,
       inspectedValues
@@ -426,6 +665,7 @@ var NmdScoreCalc = (() => {
         warnings: [],
         productRows: [],
         mkiMatrix: [],
+        mkiUnweightedMatrix: [],
         mpgMatrix: [],
         impactTable: [],
         impactLabels: [],
@@ -436,7 +676,7 @@ var NmdScoreCalc = (() => {
       const denominator = bvo > 0 && levensduur > 0 ? bvo * levensduur : null;
       const weights = getWeights(assessmentStrategy, impactIndicators);
       const impactCount = weights.length;
-      let mkiUnweighted = zeros(impactCount, STAGES2.length);
+      let mkiUnweighted = zeros(impactCount, STAGES.length);
       let includedProducts = 0;
       for (const product of producten) {
         if (!product.nmd_id) {
@@ -468,7 +708,7 @@ var NmdScoreCalc = (() => {
         traceMatrix("calculation", "Productmatrix", contribution.matrix, product.nmd_id);
         contribution.warnings.forEach((warning) => result.warnings.push(warning));
         for (let i = 0; i < impactCount; i++) {
-          for (let j = 0; j < STAGES2.length; j++) {
+          for (let j = 0; j < STAGES.length; j++) {
             mkiUnweighted[i][j] += contribution.matrix[i][j];
           }
         }
@@ -476,14 +716,15 @@ var NmdScoreCalc = (() => {
         includedProducts++;
       }
       traceMatrix("aggregate", "Ongewogen MKI-matrix", mkiUnweighted);
+      result.mkiUnweightedMatrix = mkiUnweighted;
       const mkiMatrix = applyWeights(mkiUnweighted, weights);
       traceMatrix("aggregate", "Gewogen MKI-matrix", mkiMatrix);
       result.mkiMatrix = mkiMatrix;
-      result.mki = matrixSum(mkiMatrix);
+      result.mki = matSum(mkiMatrix);
       if (denominator) {
         result.mpgMatrix = mkiMatrix.map((row) => row.map((value) => value / denominator));
         traceMatrix("aggregate", "MPG-matrix", result.mpgMatrix);
-        result.mpg = matrixSum(result.mpgMatrix);
+        result.mpg = matSum(result.mpgMatrix);
       } else {
         const warning = "BVO ontbreekt of is 0. MPG kan niet worden berekend.";
         result.warnings.push(warning);
@@ -503,54 +744,19 @@ var NmdScoreCalc = (() => {
   }
   function calculateProductContribution({ product, registration, declaration, weights, levensduur, assessmentStrategy, denominator }) {
     const impactCount = weights.length;
-    const productMatrix = zeros(impactCount, STAGES2.length);
-    const declaredLifespan = Number(declaration.construction_product?.lifespan) || levensduur;
-    const lifespan = declaredLifespan === 999 ? levensduur : declaredLifespan;
-    const f_i = Math.min(1, levensduur / lifespan);
-    const f_r = Math.max(0, levensduur / lifespan - 1);
-    const profiles = declaration.environmental_profiles || [];
-    let matchedProfile = false;
-    for (const profile of profiles) {
-      const factor = calcScaleFactor(profile, product.schaling || []);
-      const data = profile.environmental_data?.find((ed) => ed.assessment_strategy === assessmentStrategy?.id);
-      if (!data || !data.scores) {
-        const warning = `Geen scores gevonden voor strategie ${assessmentStrategy?.title || assessmentStrategy?.id} bij profiel "${profile.title || profile.id}" van ${product.nmd_id}`;
-        addWarning(warning);
-        continue;
-      }
-      matchedProfile = true;
-      for (let i = 0; i < impactCount; i++) {
-        for (let j = 0; j < STAGES2.length; j++) {
-          productMatrix[i][j] += factor * (data.scores[i]?.[j] || 0);
-        }
-      }
-    }
-    const warnings = [];
-    let unresolvedWarning = null;
-    if (!matchedProfile) {
-      unresolvedWarning = `Verklaring van ${product.nmd_id} ("${declaration.construction_product?.title || "onbekend product"}") is onopgelost: geen profiel met scores voor strategie ${assessmentStrategy?.title || assessmentStrategy?.id} gevonden`;
-      addWarning(unresolvedWarning);
-      warnings.push(unresolvedWarning);
-    }
-    if (!registration) {
-      const registrationMissingWarning = `Geen registratiegegevens voor ${product.nmd_id} \u2014 categorie-3 opslag kan niet worden toegepast`;
-      addWarning(registrationMissingWarning);
-      warnings.push(registrationMissingWarning);
-    }
-    const aantal = Number(product.aantal) || 0;
-    const categoryFactor = registration?.category === "category-3" ? 1.3 : 1;
-    const dIndex = STAGES2.indexOf("D");
-    const scaled = productMatrix.map((row) => row.map((value, colIndex) => {
-      const withAantal = value * aantal;
-      if (colIndex === dIndex && withAantal <= 0) {
-        return withAantal;
-      }
-      return withAantal * categoryFactor;
-    }));
-    const kernel = buildMPGKern(f_i, f_r, product.onv_herg ? "Ja" : "Nee", STAGES2);
+    const { f_i, f_r, lifespan } = computeReplacementFactors({ declaration, levensduur });
+    const { scaled, matchedProfile, warnings, aantal } = buildScaledProductMatrix({
+      product,
+      declaration,
+      assessmentStrategy,
+      registration,
+      impactCount,
+      STAGES
+    });
+    const kernel = buildMPGKern(f_i, f_r, product.onv_herg ? "Ja" : "Nee", STAGES);
     const finalMatrix = matMul(scaled, kernel);
     const weightedMatrix = finalMatrix.map((row, i) => row.map((value) => value * weights[i].weight));
-    const contribution = matrixSum(weightedMatrix);
+    const contribution = matSum(weightedMatrix);
     const mpgContribution = denominator ? contribution / denominator : null;
     return {
       matrix: finalMatrix,
@@ -564,27 +770,11 @@ var NmdScoreCalc = (() => {
         contribution,
         mpg_contribution: mpgContribution,
         unresolved: !matchedProfile,
-        matrix: weightedMatrix
+        matrix: weightedMatrix,
+        rawMatrix: finalMatrix
       },
       warnings
     };
-  }
-  function getWeights(strategy, indicators) {
-    const indicatorMap = {};
-    indicators.forEach((indicator) => {
-      indicatorMap[indicator.id] = indicator.title;
-    });
-    return (strategy.impact_indicators || []).sort((a, b) => a.ordering - b.ordering).map((weight) => ({
-      id: weight.impact_indicator,
-      title: indicatorMap[weight.impact_indicator] || weight.impact_indicator,
-      weight: Number(weight.weight)
-    }));
-  }
-  function applyWeights(matrix, weights) {
-    return matrix.map((row, index) => row.map((value) => value * weights[index].weight));
-  }
-  function matrixSum(matrix) {
-    return matrix.reduce((total, row) => total + row.reduce((r, v) => r + v, 0), 0);
   }
   function buildImpactTable(mki, mpg, weights) {
     return weights.map((ic, index) => ({

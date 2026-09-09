@@ -167,3 +167,80 @@ def test_calculate_mpg_uses_js_orchestration_for_a_single_product():
     assert result["mpg"] == pytest.approx(0.2 / 5625)
     assert result["impactLabels"] == ["Impact 1"]
     assert result["productRows"][0]["nmd_id"] == "NMD-1"
+
+
+def test_calculate_mpg_exposes_unweighted_matrices_including_zero_weight_indicator():
+    # Two indicators; the second carries weight 0 (e.g. "klimaatverandering -
+    # totaal"), so it vanishes from the weighted mkiMatrix. mkiUnweightedMatrix
+    # and productRows[i].rawMatrix must still carry its raw contribution so a
+    # consumer can read it back without dividing by a zero weegset weight.
+    assessment_strategy = {
+        "id": "strategy-1",
+        "title": "Strategy",
+        "impact_indicators": [
+            {"impact_indicator": "impact-1", "weight": 0.8, "ordering": 1},
+            {"impact_indicator": "impact-2", "weight": 0.0, "ordering": 2},
+        ],
+    }
+    impact_indicators = [
+        {"id": "impact-1", "title": "Impact 1"},
+        {"id": "impact-2", "title": "Klimaatverandering - totaal"},
+    ]
+
+    declaration = {
+        "construction_product": {"title": "Test product", "lifespan": 75},
+        "environmental_profiles": [
+            {
+                "title": "Profile A",
+                "environmental_data": [
+                    {
+                        "assessment_strategy": "strategy-1",
+                        "scores": [
+                            [2.0] + [0.0] * 12,
+                            [5.0] + [0.0] * 12,
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    project = {"levensduur": 75, "bvo": 75, "peildatumHandhaven": True}
+    producten = [
+        {
+            "nmd_id": "NMD-1",
+            "aantal": 1,
+            "onv_herg": False,
+            "schaling": [],
+            "_declaration": declaration,
+            "_registration": {"category": "category-1"},
+            "_declarationValid": True,
+        }
+    ]
+
+    result = calculate_mpg(project, producten, assessment_strategy, impact_indicators)
+
+    unweighted = result["mkiUnweightedMatrix"]
+    weighted = result["mkiMatrix"]
+    raw = result["productRows"][0]["rawMatrix"]
+    row_weighted = result["productRows"][0]["matrix"]
+
+    # lifespan == levensduur -> f_i = 1, f_r = 0; onv_herg False -> OHf = 1, so
+    # the A1-3 column passes through the kernel unchanged.
+    assert len(unweighted) == 2 and len(unweighted[0]) == 13
+    assert unweighted[0][0] == pytest.approx(2.0)
+    assert unweighted[1][0] == pytest.approx(5.0)
+
+    # Single product: its rawMatrix equals the aggregate unweighted matrix.
+    assert raw[0][0] == pytest.approx(2.0)
+    assert raw[1][0] == pytest.approx(5.0)
+
+    # Weighting relationship holds row-by-row, including the zero-weight row.
+    for i, w in enumerate((0.8, 0.0)):
+        for j in range(13):
+            assert weighted[i][j] == pytest.approx(unweighted[i][j] * w)
+            assert row_weighted[i][j] == pytest.approx(raw[i][j] * w)
+
+    # The zero-weight indicator is recoverable from the unweighted output only.
+    assert weighted[1][0] == pytest.approx(0.0)
+    assert unweighted[1][0] == pytest.approx(5.0)

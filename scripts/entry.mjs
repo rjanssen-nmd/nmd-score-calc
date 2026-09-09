@@ -1,7 +1,37 @@
-import { zeros, matMul } from '../../nmd_bpm_backend/html/js/calculation/matrix.js';
-import { calcScaleFactor } from '../../nmd_bpm_backend/html/js/calculation/scaling.js';
+// nmd-score-calc bundle entry point.
+//
+// All MPG *maths* is imported straight from nmd_bpm_backend's calculation
+// modules so it can never drift from the source app:
+//
+//   * computeReplacementFactors  -> f_i / f_r (breukenmethode, 999-conventie)
+//   * buildScaledProductMatrix   -> per-profiel schaling, aantal, categorie-3 opslag
+//   * buildMPGKern               -> de MPG-kernmatrix (o.a. f_r -> module B4)
+//   * getWeights / applyWeights  -> weegset-weging
+//   * matMul / matSum            -> matrixrekenwerk
+//
+// Only the thin orchestration loop below lives here, and only because the
+// Python bridge needs two outputs that upstream `calculateMPG` keeps as
+// function-locals:
+//
+//   * result.mkiUnweightedMatrix        - de gesommeerde indicator x 13-module
+//                                         matrix vóór weegset-weging
+//   * result.productRows[i].rawMatrix   - de post-kernel productmatrix van elk
+//                                         product vóór de `* weights[i].weight` stap
+//
+// Keeping the loop here also keeps `calculateMPG` synchronous: upstream
+// declares it `async`, which the py_mini_racer eval bridge cannot await.
+// The loop mirrors nmd_bpm_backend/html/js/calculation/mpgCalculator.js
+// (default "MPG" scoreType path) 1:1.
+
+import { zeros, matMul, matSum as matrixSum } from '../../nmd_bpm_backend/html/js/calculation/matrix.js';
 import { buildMPGKern } from '../../nmd_bpm_backend/html/js/calculation/kernels.js';
 import { STAGES } from '../../nmd_bpm_backend/html/js/calculation/stages.js';
+import {
+  getWeights,
+  applyWeights,
+  computeReplacementFactors,
+  buildScaledProductMatrix,
+} from '../../nmd_bpm_backend/html/js/calculation/productContribution.js';
 import {
   startTrace,
   finishTrace,
@@ -13,6 +43,7 @@ import {
 
 export * from '../../nmd_bpm_backend/html/js/calculation/kernels.js';
 export * from '../../nmd_bpm_backend/html/js/calculation/scaling.js';
+export { getWeights, applyWeights, computeReplacementFactors, buildScaledProductMatrix } from '../../nmd_bpm_backend/html/js/calculation/productContribution.js';
 export { reconcileScaling } from '../../nmd_bpm_backend/html/js/producten/schalingImport.js';
 
 export function calculateMPG({ project, producten, assessmentStrategy, impactIndicators }) {
@@ -25,6 +56,7 @@ export function calculateMPG({ project, producten, assessmentStrategy, impactInd
       warnings: [],
       productRows: [],
       mkiMatrix: [],
+      mkiUnweightedMatrix: [],
       mpgMatrix: [],
       impactTable: [],
       impactLabels: [],
@@ -84,6 +116,7 @@ export function calculateMPG({ project, producten, assessmentStrategy, impactInd
     }
 
     traceMatrix('aggregate', 'Ongewogen MKI-matrix', mkiUnweighted);
+    result.mkiUnweightedMatrix = mkiUnweighted;
     const mkiMatrix = applyWeights(mkiUnweighted, weights);
     traceMatrix('aggregate', 'Gewogen MKI-matrix', mkiMatrix);
     result.mkiMatrix = mkiMatrix;
@@ -115,55 +148,17 @@ export function calculateMPG({ project, producten, assessmentStrategy, impactInd
 
 function calculateProductContribution({ product, registration, declaration, weights, levensduur, assessmentStrategy, denominator }) {
   const impactCount = weights.length;
-  const productMatrix = zeros(impactCount, STAGES.length);
-  const declaredLifespan = Number(declaration.construction_product?.lifespan) || levensduur;
-  const lifespan = declaredLifespan === 999 ? levensduur : declaredLifespan;
-  const f_i = Math.min(1, levensduur / lifespan);
-  const f_r = Math.max(0, levensduur / lifespan - 1);
-  const profiles = declaration.environmental_profiles || [];
-  let matchedProfile = false;
 
-  for (const profile of profiles) {
-    const factor = calcScaleFactor(profile, product.schaling || []);
-    const data = profile.environmental_data?.find((ed) => ed.assessment_strategy === assessmentStrategy?.id);
-    if (!data || !data.scores) {
-      const warning = `Geen scores gevonden voor strategie ${assessmentStrategy?.title || assessmentStrategy?.id} bij profiel "${profile.title || profile.id}" van ${product.nmd_id}`;
-      addWarning(warning);
-      continue;
-    }
+  const { f_i, f_r, lifespan } = computeReplacementFactors({ declaration, levensduur });
 
-    matchedProfile = true;
-    for (let i = 0; i < impactCount; i++) {
-      for (let j = 0; j < STAGES.length; j++) {
-        productMatrix[i][j] += factor * (data.scores[i]?.[j] || 0);
-      }
-    }
-  }
-
-  const warnings = [];
-  let unresolvedWarning = null;
-  if (!matchedProfile) {
-    unresolvedWarning = `Verklaring van ${product.nmd_id} ("${declaration.construction_product?.title || 'onbekend product'}") is onopgelost: geen profiel met scores voor strategie ${assessmentStrategy?.title || assessmentStrategy?.id} gevonden`;
-    addWarning(unresolvedWarning);
-    warnings.push(unresolvedWarning);
-  }
-
-  if (!registration) {
-    const registrationMissingWarning = `Geen registratiegegevens voor ${product.nmd_id} — categorie-3 opslag kan niet worden toegepast`;
-    addWarning(registrationMissingWarning);
-    warnings.push(registrationMissingWarning);
-  }
-
-  const aantal = Number(product.aantal) || 0;
-  const categoryFactor = registration?.category === 'category-3' ? 1.3 : 1;
-  const dIndex = STAGES.indexOf('D');
-  const scaled = productMatrix.map((row) => row.map((value, colIndex) => {
-    const withAantal = value * aantal;
-    if (colIndex === dIndex && withAantal <= 0) {
-      return withAantal;
-    }
-    return withAantal * categoryFactor;
-  }));
+  const { scaled, matchedProfile, warnings, aantal } = buildScaledProductMatrix({
+    product,
+    declaration,
+    assessmentStrategy,
+    registration,
+    impactCount,
+    STAGES,
+  });
 
   const kernel = buildMPGKern(f_i, f_r, product.onv_herg ? 'Ja' : 'Nee', STAGES);
   const finalMatrix = matMul(scaled, kernel);
@@ -184,32 +179,10 @@ function calculateProductContribution({ product, registration, declaration, weig
       mpg_contribution: mpgContribution,
       unresolved: !matchedProfile,
       matrix: weightedMatrix,
+      rawMatrix: finalMatrix,
     },
     warnings,
   };
-}
-
-function getWeights(strategy, indicators) {
-  const indicatorMap = {};
-  indicators.forEach((indicator) => {
-    indicatorMap[indicator.id] = indicator.title;
-  });
-
-  return (strategy.impact_indicators || [])
-    .sort((a, b) => a.ordering - b.ordering)
-    .map((weight) => ({
-      id: weight.impact_indicator,
-      title: indicatorMap[weight.impact_indicator] || weight.impact_indicator,
-      weight: Number(weight.weight),
-    }));
-}
-
-function applyWeights(matrix, weights) {
-  return matrix.map((row, index) => row.map((value) => value * weights[index].weight));
-}
-
-function matrixSum(matrix) {
-  return matrix.reduce((total, row) => total + row.reduce((r, v) => r + v, 0), 0);
 }
 
 function buildImpactTable(mki, mpg, weights) {
