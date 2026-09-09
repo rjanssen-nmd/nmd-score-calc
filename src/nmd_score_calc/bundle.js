@@ -1,4 +1,4 @@
-// Bundled from nmd_bpm_backend commit fab28c7c73ee3e89da1344350e07c6b47b86805f
+// Bundled from nmd_bpm_backend commit 1d7cc3eec585091c1d6b739e283d570e4851415d
 var NmdScoreCalc = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -108,7 +108,7 @@ var NmdScoreCalc = (() => {
     const b4Col = STAGES3.indexOf("B4");
     if (b4Col !== -1) {
       STAGES3.forEach((mod, row) => {
-        if (mod.startsWith("A") || mod.startsWith("B") || mod.startsWith("C")) {
+        if (mod.startsWith("A") || mod.startsWith("B") || mod.startsWith("C") || mod.startsWith("D")) {
           MPG_kern[row][b4Col] += f_r;
         }
       });

@@ -45,10 +45,12 @@ def test_build_mpg_kern_matches_upstream_behavior():
     assert kern[4][4] == 0.2
     assert kern[5][5] == 0.2
 
+    # f_r booked into the B4 column from every A/B/C *and* D row
+    # (replacements repeat the full life cycle incl. module D; B5 stays 0).
     assert kern[1][2] == 0.5
     assert kern[0][2] == 0.5
     assert kern[4][2] == 0.5
-    assert kern[5][2] == 0.0
+    assert kern[5][2] == 0.5
 
 
 @pytest.mark.parametrize(

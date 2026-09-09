@@ -2,7 +2,7 @@
 
 Python bridge around the shared NMD BPM frontend calculator logic.
 
-This package bundles the current frontend calculator implementation from the sibling repository [nmd_bpm_backend](https://github.com/rjanssen-nmd/nmd-bpm-backend) and exposes it through a small Python API. The generated bundle is pinned to the frontend commit `fab28c7c73ee3e89da1344350e07c6b47b86805f` and should be regenerated manually (`python scripts/bundle_js.py`) when upstream changes are needed.
+This package bundles the current frontend calculator implementation from the sibling repository [nmd_bpm_backend](https://github.com/rjanssen-nmd/nmd-bpm-backend) and exposes it through a small Python API. The generated bundle is pinned to the frontend commit `1d7cc3eec585091c1d6b739e283d570e4851415d` and should be regenerated manually (`python scripts/bundle_js.py`) when upstream changes are needed.
 
 The package now includes the bundled JavaScript file in installed wheels so `pip install` works outside the development checkout.
 
